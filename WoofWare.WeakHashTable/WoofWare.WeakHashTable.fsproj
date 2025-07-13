@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+      <TargetFramework>netstandard2.0</TargetFramework>
+      <GenerateDocumentationFile>true</GenerateDocumentationFile>
+      <Authors>Patrick Stevens</Authors>
+      <Copyright>Copyright (c) Patrick Stevens 2025</Copyright>
+      <Description>A single-module library with a hashtable that keeps a weak pointer to each key's data and uses a finalizer to detect when the data is no longer referenced (by any non-weak pointers).</Description>
+      <RepositoryType>git</RepositoryType>
+      <RepositoryUrl>https://github.com/Smaug123/WoofWare.WeakHashTable</RepositoryUrl>
+      <PackageLicenseExpression>MIT</PackageLicenseExpression>
+      <PackageReadmeFile>README.md</PackageReadmeFile>
+      <PackageTags>hash_table;weak_pointer;core_kernel;ocaml</PackageTags>
+      <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <Compile Include="WeakHashTable.fs" />
+      <EmbeddedResource Include="SurfaceBaseline.txt" />
+      <EmbeddedResource Include="../version.json" />
+      <None Include="..\README.md">
+        <Pack>True</Pack>
+        <PackagePath>\</PackagePath>
+      </None>
+    </ItemGroup>
+    <ItemGroup>
+        <PackageReference Update="FSharp.Core" Version="5.0.0" />
+    </ItemGroup>
+</Project>

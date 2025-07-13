@@ -1,0 +1,17 @@
+WoofWare.WeakHashTable.WeakHashTable inherit obj
+WoofWare.WeakHashTable.WeakHashTable.addThrowing [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> 'Key -> 'Value -> unit
+WoofWare.WeakHashTable.WeakHashTable.clear [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> unit
+WoofWare.WeakHashTable.WeakHashTable.create [static method]: int option -> WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value>
+WoofWare.WeakHashTable.WeakHashTable.find [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> 'Key -> 'Value option
+WoofWare.WeakHashTable.WeakHashTable.findOrAdd [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> 'Key -> (unit -> 'Value) -> 'Value
+WoofWare.WeakHashTable.WeakHashTable.keyIsUsingSpace [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> 'Key -> bool
+WoofWare.WeakHashTable.WeakHashTable.mem [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> 'Key -> bool
+WoofWare.WeakHashTable.WeakHashTable.reclaimSpaceForKeysWithUnusedData [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> unit
+WoofWare.WeakHashTable.WeakHashTable.remove [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> 'Key -> unit
+WoofWare.WeakHashTable.WeakHashTable.replace [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> 'Key -> 'Value -> unit
+WoofWare.WeakHashTable.WeakHashTable.setRunWhenUnusedData [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> (unit -> unit) -> unit
+WoofWare.WeakHashTable.WeakHashTable`2 inherit obj
+WoofWare.WeakHashTable.WeakHashTableCrate - interface with 1 member(s)
+WoofWare.WeakHashTable.WeakHashTableCrate.Apply [method]: 'ret WoofWare.WeakHashTable.WeakHashTableEval -> 'ret
+WoofWare.WeakHashTable.WeakHashTableEval`1 - interface with 1 member(s)
+WoofWare.WeakHashTable.WeakHashTableEval`1.Eval [method]: WoofWare.WeakHashTable.WeakHashTable<'a, 'b> -> 'ret
