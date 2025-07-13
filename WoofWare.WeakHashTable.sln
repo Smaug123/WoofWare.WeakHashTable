@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WoofWare.WeakHashTable", "WoofWare.WeakHashTable\WoofWare.WeakHashTable.fsproj", "{E6EBE16C-4AB0-420A-A5BB-F3FF7351CBD3}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WoofWare.WeakHashTable.Test", "WoofWare.WeakHashTable.Test\WoofWare.WeakHashTable.Test.fsproj", "{298486C5-CBE2-48BF-BBEE-BA9B78310FFC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E6EBE16C-4AB0-420A-A5BB-F3FF7351CBD3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E6EBE16C-4AB0-420A-A5BB-F3FF7351CBD3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E6EBE16C-4AB0-420A-A5BB-F3FF7351CBD3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E6EBE16C-4AB0-420A-A5BB-F3FF7351CBD3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{298486C5-CBE2-48BF-BBEE-BA9B78310FFC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{298486C5-CBE2-48BF-BBEE-BA9B78310FFC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{298486C5-CBE2-48BF-BBEE-BA9B78310FFC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{298486C5-CBE2-48BF-BBEE-BA9B78310FFC}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
