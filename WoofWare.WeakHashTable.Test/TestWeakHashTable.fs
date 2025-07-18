@@ -15,9 +15,12 @@ module TestWeakHashTable =
 
     let data (i : int) = ref i
 
+    [<OneTimeSetUp>]
+    let oneTimeSetup () =
 #if DEBUG
-    do failwith "These tests only run in release mode"
+        do failwith "These tests only run in release mode"
 #endif
+        ()
 
     [<Test>]
     let ``Test basic operations`` () =

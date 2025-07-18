@@ -13,5 +13,7 @@ WoofWare.WeakHashTable.WeakHashTable.setRunWhenUnusedData [static method]: WoofW
 WoofWare.WeakHashTable.WeakHashTable`2 inherit obj
 WoofWare.WeakHashTable.WeakHashTableCrate - interface with 1 member(s)
 WoofWare.WeakHashTable.WeakHashTableCrate.Apply [method]: 'ret WoofWare.WeakHashTable.WeakHashTableEval -> 'ret
+WoofWare.WeakHashTable.WeakHashTableCrateModule inherit obj
+WoofWare.WeakHashTable.WeakHashTableCrateModule.make [static method]: WoofWare.WeakHashTable.WeakHashTable<'k, 'v> -> WoofWare.WeakHashTable.WeakHashTableCrate
 WoofWare.WeakHashTable.WeakHashTableEval`1 - interface with 1 member(s)
 WoofWare.WeakHashTable.WeakHashTableEval`1.Eval [method]: WoofWare.WeakHashTable.WeakHashTable<'a, 'b> -> 'ret
