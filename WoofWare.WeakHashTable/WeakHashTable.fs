@@ -58,6 +58,15 @@ type WeakHashTableCrate =
     /// Apply the given visitor to the WeakHashTable contained within this WeakHashTableCrate.
     abstract Apply<'ret> : WeakHashTableEval<'ret> -> 'ret
 
+/// A WeakHashTable with its type parameters hidden. Visit it with a WeakHashTableEval.
+[<RequireQualifiedAccess>]
+module WeakHashTableCrate =
+    /// Hide the type parameter of the input.
+    let make<'k, 'v when 'k : equality and 'v : not struct> (c : WeakHashTable<'k, 'v>) : WeakHashTableCrate =
+        { new WeakHashTableCrate with
+            member _.Apply e = e.Eval c
+        }
+
 [<RequireQualifiedAccess>]
 module WeakHashTable =
     /// Creates a new weak hash table
@@ -72,17 +81,30 @@ module WeakHashTable =
         }
 
     /// Sets the callback to run when unused data is detected
-    let setRunWhenUnusedData (t : WeakHashTable<'Key, 'Value>) (threadSafeF : unit -> unit) : unit =
+    let setRunWhenUnusedData<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (threadSafeF : unit -> unit)
+        : unit
+        =
         t.ThreadSafeRunWhenUnusedData <- threadSafeF
 
     /// Removes a key from the table
-    let remove (t : WeakHashTable<'Key, 'Value>) (key : 'Key) : unit = t.EntryByKey.Remove key |> ignore<bool>
+    let remove<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        : unit
+        =
+        t.EntryByKey.Remove key |> ignore<bool>
 
     /// Clears all entries from the table
-    let clear (t : WeakHashTable<'Key, 'Value>) : unit = t.EntryByKey.Clear ()
+    let clear<'Key, 'Value when 'Key : equality and 'Value : not struct> (t : WeakHashTable<'Key, 'Value>) : unit =
+        t.EntryByKey.Clear ()
 
     /// Reclaims space for keys whose values have been garbage collected
-    let reclaimSpaceForKeysWithUnusedData (t : WeakHashTable<'Key, 'Value>) : unit =
+    let reclaimSpaceForKeysWithUnusedData<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        : unit
+        =
         let rec processQueue () =
             match t.KeysWithUnusedData.TryDequeue () with
             | true, key ->
@@ -96,7 +118,11 @@ module WeakHashTable =
         processQueue ()
 
     /// Gets or creates a weak reference entry for a key
-    let private getEntry (t : WeakHashTable<'Key, 'Value>) (key : 'Key) : WeakReference =
+    let private getEntry<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        : WeakReference
+        =
         match t.EntryByKey.TryGetValue key with
         | true, entry -> entry
         | false, _ ->
@@ -105,16 +131,31 @@ module WeakHashTable =
             entry
 
     /// Checks if a key exists with a live value
-    let mem (t : WeakHashTable<'Key, 'Value>) (key : 'Key) : bool =
+    let mem<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        : bool
+        =
         match t.EntryByKey.TryGetValue key with
         | true, entry -> entry.IsAlive
         | false, _ -> false
 
     /// Checks if a key is using space in the table (regardless of whether value is alive)
-    let keyIsUsingSpace (t : WeakHashTable<'Key, 'Value>) (key : 'Key) : bool = t.EntryByKey.ContainsKey key
+    let keyIsUsingSpace<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        : bool
+        =
+        t.EntryByKey.ContainsKey key
 
     /// Sets data for an entry and registers finalizer
-    let private setData (t : WeakHashTable<'Key, 'Value>) (key : 'Key) (entry : WeakReference) (data : 'Value) : unit =
+    let private setData<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        (entry : WeakReference)
+        (data : 'Value)
+        : unit
+        =
         entry.Target <- data
 
         // Register a finalizer to enqueue the key when the value is collected
@@ -133,11 +174,21 @@ module WeakHashTable =
         cleanup.Add (data, callbackObj)
 
     /// Replaces the value for a key
-    let replace (t : WeakHashTable<'Key, 'Value>) (key : 'Key) (data : 'Value) : unit =
+    let replace<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        (data : 'Value)
+        : unit
+        =
         setData t key (getEntry t key) data
 
     /// Adds a new key-value pair, raising an exception if key already exists with live value
-    let addThrowing (t : WeakHashTable<'Key, 'Value>) (key : 'Key) (data : 'Value) : unit =
+    let addThrowing<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        (data : 'Value)
+        : unit
+        =
         let entry = getEntry t key
 
         if entry.IsAlive then
@@ -146,7 +197,11 @@ module WeakHashTable =
         setData t key entry data
 
     /// Finds the value associated with a key
-    let find (t : WeakHashTable<'Key, 'Value>) (key : 'Key) : 'Value option =
+    let find<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        : 'Value option
+        =
         match t.EntryByKey.TryGetValue key with
         | true, entry ->
             match entry.Target with
@@ -155,7 +210,12 @@ module WeakHashTable =
         | false, _ -> None
 
     /// Finds the value for a key or adds a new one using the default function
-    let findOrAdd (t : WeakHashTable<'Key, 'Value>) (key : 'Key) (defaultF : unit -> 'Value) : 'Value =
+    let findOrAdd<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        (defaultF : unit -> 'Value)
+        : 'Value
+        =
         let entry = getEntry t key
 
         match entry.Target with
