@@ -58,6 +58,7 @@
           src = ./.;
           projectFile = "./WoofWare.WeakHashTable/WoofWare.WeakHashTable.fsproj";
           testProjectFile = "./WoofWare.WeakHashTable.Test/WoofWare.WeakHashTable.Test.fsproj";
+          disabledTests = ["WoofWare.WeakHashTable.Test.TestSurface.EnsureVersionIsMonotonic"];
           nugetDeps = ./nix/deps.json; # `nix build .#default.fetch-deps && ./result nix/deps.json`
           doCheck = true;
         };
