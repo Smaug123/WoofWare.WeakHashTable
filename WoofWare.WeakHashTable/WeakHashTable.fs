@@ -45,8 +45,35 @@ type WeakHashTable<'Key, 'Value when 'Key : equality and 'Value : not struct> =
         {
             EntryByKey : Dictionary<'Key, WeakReference>
             KeysWithUnusedData : ConcurrentQueue<'Key>
+            Sentinels : ConditionalWeakTable<'Value, Sentinel<'Key, 'Value>>
             mutable ThreadSafeRunWhenUnusedData : unit -> unit
         }
+
+/// Tracks keys that reference a particular value so they can all be enqueued when that value dies.
+and private Sentinel<'Key, 'Value when 'Key : equality and 'Value : not struct> (table : WeakHashTable<'Key, 'Value>) =
+    let keys = ConcurrentQueue<'Key> ()
+
+    member _.AddKey key = keys.Enqueue key
+
+    override _.Finalize () =
+        try
+            let mutable enqueued = false
+
+            let mutable continueLooping = true
+
+            while continueLooping do
+                let mutable key = Unchecked.defaultof<'Key>
+
+                match keys.TryDequeue &key with
+                | true ->
+                    table.KeysWithUnusedData.Enqueue key
+                    enqueued <- true
+                | false -> continueLooping <- false
+
+            if enqueued then
+                table.ThreadSafeRunWhenUnusedData ()
+        with _ ->
+            ()
 
 /// Visitor for a WeakHashTable, intended for use with WeakHashTableCrate.
 type WeakHashTableEval<'ret> =
@@ -77,6 +104,7 @@ module WeakHashTable =
         {
             EntryByKey = Dictionary<'Key, WeakReference> (defaultArg initialCapacity 0)
             KeysWithUnusedData = ConcurrentQueue<'Key> ()
+            Sentinels = ConditionalWeakTable<'Value, Sentinel<'Key, 'Value>> ()
             ThreadSafeRunWhenUnusedData = ignore
         }
 
@@ -159,19 +187,15 @@ module WeakHashTable =
         entry.Target <- data
 
         // Register a finalizer to enqueue the key when the value is collected
-        let cleanup = ConditionalWeakTable<'Value, Object> ()
+        let sentinel =
+            t.Sentinels.GetValue (
+                data,
+                ConditionalWeakTable<'Value, Sentinel<'Key, 'Value>>.CreateValueCallback (fun _ ->
+                    new Sentinel<'Key, 'Value> (t)
+                )
+            )
 
-        let callbackObj =
-            { new Object() with
-                override _.Finalize () =
-                    try
-                        t.KeysWithUnusedData.Enqueue key
-                        t.ThreadSafeRunWhenUnusedData ()
-                    with _ ->
-                        ()
-            }
-
-        cleanup.Add (data, callbackObj)
+        sentinel.AddKey key
 
     /// Replaces the value for a key
     let replace<'Key, 'Value when 'Key : equality and 'Value : not struct>

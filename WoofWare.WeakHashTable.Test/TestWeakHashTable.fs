@@ -200,3 +200,31 @@ module TestWeakHashTable =
         stabilize ()
 
         isAbsent k3 |> shouldEqual true
+
+    // Regression test for ConditionalWeakTable lifetime bug
+    [<Test>]
+    let ``Callback should not fire while value is still alive`` () =
+        let t = WeakHashTable.create<int, int ref> None
+        let key = 42
+        let callbackFired = ref false
+
+        WeakHashTable.setRunWhenUnusedData t (fun () -> callbackFired.Value <- true)
+
+        // Add data and keep a strong reference to it
+        let strongRef = data key
+        WeakHashTable.addThrowing t key strongRef
+
+        forceGc ()
+
+        // The callback should NOT have fired yet
+        callbackFired.Value |> shouldEqual false
+
+        // Verify the value is still in the table
+        WeakHashTable.mem t key |> shouldEqual true
+
+        match WeakHashTable.find t key with
+        | Some v -> v.Value |> shouldEqual key
+        | None -> failwith "Value should still be in table"
+
+        // Keep strongRef alive until this point
+        GC.KeepAlive strongRef
