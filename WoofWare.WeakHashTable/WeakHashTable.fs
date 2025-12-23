@@ -224,7 +224,18 @@ module WeakHashTable =
         else
             // Non-null value: store in EntryByKey, remove from NullValueKeys
             t.NullValueKeys.Remove key |> ignore<bool>
-            setData t key (getEntry t key) data
+            // Check if an entry already existed BEFORE calling getEntry
+            let entryExisted = t.EntryByKey.ContainsKey key
+            let entry = getEntry t key
+
+            try
+                setData t key entry data
+            with _ ->
+                // If setData throws and we created a new entry, clean it up
+                if not entryExisted then
+                    t.EntryByKey.Remove key |> ignore<bool>
+
+                reraise ()
 
     /// Adds a new key-value pair, raising an exception if key already exists with live value
     let addThrowing<'Key, 'Value when 'Key : equality and 'Value : not struct>

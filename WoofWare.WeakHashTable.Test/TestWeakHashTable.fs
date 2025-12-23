@@ -232,8 +232,16 @@ module TestWeakHashTable =
             Assert.Throws<KeyAlreadyInUseException> (fun () -> WeakHashTable.addThrowing t key null)
 
         exc.Data0 |> unbox<int> |> shouldEqual 1
-        // Verify the original value is still there
+        // Verify the original value is still there and state is consistent
         WeakHashTable.find t key |> shouldEqual (Some value)
+        WeakHashTable.mem t key |> shouldEqual true
+        WeakHashTable.keyIsUsingSpace t key |> shouldEqual true
+        // Verify that the failed null add didn't corrupt the table
+        // (e.g., the key shouldn't suddenly become a null entry after GC)
+        forceGc ()
+        WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+        WeakHashTable.find t key |> shouldEqual (Some value)
+        WeakHashTable.mem t key |> shouldEqual true
         GC.KeepAlive value
 
     [<Test>]
@@ -422,3 +430,120 @@ module TestWeakHashTable =
         WeakHashTable.mem t key1 |> shouldEqual true
         WeakHashTable.find t key1 |> shouldEqual (Some value)
         GC.KeepAlive value
+
+    [<Test>]
+    let ``replace with duplicate value throws and leaves no tombstone`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key1 = 1
+        let key2 = 2
+        let value = obj ()
+
+        // Add value under key1
+        WeakHashTable.addThrowing t key1 value
+
+        // Try to replace key2 with the same value - should throw because
+        // ConditionalWeakTable doesn't allow duplicate keys
+        Assert.Throws<ArgumentException> (fun () -> WeakHashTable.replace t key2 value)
+        |> ignore
+
+        // key2 should NOT be using space
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
+        WeakHashTable.mem t key2 |> shouldEqual false
+
+        // key1 should still have the value
+        WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual true
+        WeakHashTable.mem t key1 |> shouldEqual true
+        WeakHashTable.find t key1 |> shouldEqual (Some value)
+        GC.KeepAlive value
+
+    [<Test>]
+    let ``clear preserves null values until explicitly cleared`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key1 = 1
+        let key2 = 2
+        let value = obj ()
+
+        // Add a null value and a non-null value
+        WeakHashTable.addThrowing t key1 null
+        WeakHashTable.addThrowing t key2 value
+
+        // Both should be present
+        WeakHashTable.mem t key1 |> shouldEqual true
+        WeakHashTable.mem t key2 |> shouldEqual true
+        WeakHashTable.find t key1 |> shouldEqual (Some null)
+        WeakHashTable.find t key2 |> shouldEqual (Some value)
+
+        // Clear the table
+        WeakHashTable.clear t
+
+        // Both should be gone
+        WeakHashTable.mem t key1 |> shouldEqual false
+        WeakHashTable.mem t key2 |> shouldEqual false
+        WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual false
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
+        WeakHashTable.find t key1 |> shouldEqual None
+        WeakHashTable.find t key2 |> shouldEqual None
+        GC.KeepAlive value
+
+    [<Test>]
+    let ``replace non-null with null then old value finalizes does not reclaim null entry`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        let mutable callbacks = 0
+
+        WeakHashTable.setRunWhenUnusedData t (fun () -> callbacks <- callbacks + 1)
+
+        // Add a non-null value (use a scope so we can let it be collected)
+        do
+            let value = obj ()
+            WeakHashTable.addThrowing t key value
+
+            WeakHashTable.mem t key |> shouldEqual true
+            WeakHashTable.find t key |> shouldEqual (Some value)
+
+            // Replace with null - old value is now unreferenced
+            WeakHashTable.replace t key null
+
+            // Key should now have null value
+            WeakHashTable.mem t key |> shouldEqual true
+            WeakHashTable.find t key |> shouldEqual (Some null)
+            WeakHashTable.keyIsUsingSpace t key |> shouldEqual true
+
+            GC.KeepAlive value
+
+        // Force GC to finalize the old non-null value
+        forceGc ()
+
+        // Callback should have fired for the old value
+        callbacks |> shouldEqual 1
+
+        // Run reclaim - this should NOT remove the null entry
+        WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+
+        // Null entry should still be present
+        WeakHashTable.mem t key |> shouldEqual true
+        WeakHashTable.find t key |> shouldEqual (Some null)
+        WeakHashTable.keyIsUsingSpace t key |> shouldEqual true
+
+    [<Test>]
+    let ``null entries survive GC and reclaim`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+
+        // Add a null value
+        WeakHashTable.addThrowing t key null
+
+        // Should be present
+        WeakHashTable.mem t key |> shouldEqual true
+        WeakHashTable.find t key |> shouldEqual (Some null)
+        WeakHashTable.keyIsUsingSpace t key |> shouldEqual true
+
+        // Force multiple GC cycles
+        for _ = 1 to 5 do
+            forceGc ()
+            WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+
+        // Null entry should still be present
+        WeakHashTable.mem t key |> shouldEqual true
+        WeakHashTable.find t key |> shouldEqual (Some null)
+        WeakHashTable.keyIsUsingSpace t key |> shouldEqual true
