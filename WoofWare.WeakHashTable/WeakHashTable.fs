@@ -43,7 +43,10 @@ open System.Runtime.CompilerServices
 type WeakHashTable<'Key, 'Value when 'Key : equality and 'Value : not struct> =
     private
         {
+            /// Non-null values stored with weak references
             EntryByKey : Dictionary<'Key, WeakReference>
+            /// Keys explicitly set to null (no cleanup needed - null can't be collected)
+            NullValueKeys : HashSet<'Key>
             KeysWithUnusedData : ConcurrentQueue<'Key>
             mutable ThreadSafeRunWhenUnusedData : unit -> unit
             /// Weak table that ties finalizer objects to values. Must be rooted to prevent premature collection.
@@ -78,6 +81,7 @@ module WeakHashTable =
         =
         {
             EntryByKey = Dictionary<'Key, WeakReference> (defaultArg initialCapacity 0)
+            NullValueKeys = HashSet<'Key> ()
             KeysWithUnusedData = ConcurrentQueue<'Key> ()
             ThreadSafeRunWhenUnusedData = ignore
             CleanupTable = ConditionalWeakTable<'Value, Object> ()
@@ -98,10 +102,12 @@ module WeakHashTable =
         : unit
         =
         t.EntryByKey.Remove key |> ignore<bool>
+        t.NullValueKeys.Remove key |> ignore<bool>
 
     /// Clears all entries from the table
     let clear<'Key, 'Value when 'Key : equality and 'Value : not struct> (t : WeakHashTable<'Key, 'Value>) : unit =
         t.EntryByKey.Clear ()
+        t.NullValueKeys.Clear ()
 
     /// Reclaims space for keys whose values have been garbage collected
     let reclaimSpaceForKeysWithUnusedData<'Key, 'Value when 'Key : equality and 'Value : not struct>
@@ -139,9 +145,10 @@ module WeakHashTable =
         (key : 'Key)
         : bool
         =
-        match t.EntryByKey.TryGetValue key with
-        | true, entry -> entry.IsAlive
-        | false, _ -> false
+        t.NullValueKeys.Contains key
+        || match t.EntryByKey.TryGetValue key with
+           | true, entry -> entry.IsAlive
+           | false, _ -> false
 
     /// Checks if a key is using space in the table (regardless of whether value is alive)
     let keyIsUsingSpace<'Key, 'Value when 'Key : equality and 'Value : not struct>
@@ -149,7 +156,7 @@ module WeakHashTable =
         (key : 'Key)
         : bool
         =
-        t.EntryByKey.ContainsKey key
+        t.NullValueKeys.Contains key || t.EntryByKey.ContainsKey key
 
     /// Sets data for an entry and registers finalizer
     let private setData<'Key, 'Value when 'Key : equality and 'Value : not struct>
@@ -183,7 +190,14 @@ module WeakHashTable =
         (data : 'Value)
         : unit
         =
-        setData t key (getEntry t key) data
+        if Object.isNull data then
+            // Null value: store in NullValueKeys, remove from EntryByKey
+            t.NullValueKeys.Add key |> ignore<bool>
+            t.EntryByKey.Remove key |> ignore<bool>
+        else
+            // Non-null value: store in EntryByKey, remove from NullValueKeys
+            t.NullValueKeys.Remove key |> ignore<bool>
+            setData t key (getEntry t key) data
 
     /// Adds a new key-value pair, raising an exception if key already exists with live value
     let addThrowing<'Key, 'Value when 'Key : equality and 'Value : not struct>
@@ -192,12 +206,20 @@ module WeakHashTable =
         (data : 'Value)
         : unit
         =
-        let entry = getEntry t key
-
-        if entry.IsAlive then
+        // Check if key already has a live value (either null or non-null)
+        if t.NullValueKeys.Contains key then
             failwithf "WeakHashTable.addThrowing: key already in use"
 
-        setData t key entry data
+        if Object.isNull data then
+            // Null value: just add to NullValueKeys
+            t.NullValueKeys.Add key |> ignore<bool>
+        else
+            let entry = getEntry t key
+
+            if entry.IsAlive then
+                failwithf "WeakHashTable.addThrowing: key already in use"
+
+            setData t key entry data
 
     /// Finds the value associated with a key
     let find<'Key, 'Value when 'Key : equality and 'Value : not struct>
@@ -205,12 +227,15 @@ module WeakHashTable =
         (key : 'Key)
         : 'Value option
         =
-        match t.EntryByKey.TryGetValue key with
-        | true, entry ->
-            match entry.Target with
-            | :? 'Value as value -> Some value
-            | _ -> None
-        | false, _ -> None
+        if t.NullValueKeys.Contains key then
+            Some Unchecked.defaultof<'Value>
+        else
+            match t.EntryByKey.TryGetValue key with
+            | true, entry ->
+                match entry.Target with
+                | :? 'Value as value -> Some value
+                | _ -> None
+            | false, _ -> None
 
     /// Finds the value for a key or adds a new one using the default function
     let findOrAdd<'Key, 'Value when 'Key : equality and 'Value : not struct>
@@ -219,11 +244,36 @@ module WeakHashTable =
         (defaultF : unit -> 'Value)
         : 'Value
         =
-        let entry = getEntry t key
+        // First check if key has a null value
+        if t.NullValueKeys.Contains key then
+            Unchecked.defaultof<'Value>
+        else
+            match t.EntryByKey.TryGetValue key with
+            | true, entry ->
+                match entry.Target with
+                | :? 'Value as value -> value
+                | _ ->
+                    // Entry exists but value is dead; get new value
+                    let data = defaultF ()
 
-        match entry.Target with
-        | :? 'Value as value -> value
-        | _ ->
-            let data = defaultF ()
-            setData t key entry data
-            data
+                    if Object.isNull data then
+                        // Store null in NullValueKeys, remove dead entry from EntryByKey
+                        t.NullValueKeys.Add key |> ignore<bool>
+                        t.EntryByKey.Remove key |> ignore<bool>
+                    else
+                        setData t key entry data
+
+                    data
+            | false, _ ->
+                // No entry exists; get value first
+                let data = defaultF ()
+
+                if Object.isNull data then
+                    // Store null in NullValueKeys
+                    t.NullValueKeys.Add key |> ignore<bool>
+                else
+                    let entry = WeakReference (null : obj)
+                    t.EntryByKey.[key] <- entry
+                    setData t key entry data
+
+                data
