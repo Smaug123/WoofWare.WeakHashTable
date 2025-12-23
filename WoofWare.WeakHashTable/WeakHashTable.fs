@@ -6,6 +6,11 @@ open System.Collections.Generic
 open System.Collections.Concurrent
 open System.Runtime.CompilerServices
 
+/// Indicates that you tried to add a value to a WeakHashTable under a key that already had a value.
+///
+/// Contains the key that already had a value.
+exception KeyAlreadyInUseException of obj
+
 /// <summary>
 /// A hashtable that keeps a weak pointer to each key's data and uses a finalizer to
 /// detect when the data is no longer referenced (by any non-weak pointers).
@@ -208,7 +213,7 @@ module WeakHashTable =
         =
         // Check if key already has a live value (either null or non-null)
         if t.NullValueKeys.Contains key then
-            failwithf "WeakHashTable.addThrowing: key already in use"
+            raise (KeyAlreadyInUseException key)
 
         if Object.isNull data then
             // Null value: just add to NullValueKeys
@@ -217,7 +222,7 @@ module WeakHashTable =
             let entry = getEntry t key
 
             if entry.IsAlive then
-                failwithf "WeakHashTable.addThrowing: key already in use"
+                raise (KeyAlreadyInUseException key)
 
             setData t key entry data
 

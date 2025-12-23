@@ -184,6 +184,93 @@ module TestWeakHashTable =
             WeakHashTable.keyIsUsingSpace t key |> shouldEqual false
             WeakHashTable.mem t key |> shouldEqual false
 
+    [<Test>]
+    let ``null values can be stored and retrieved`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        WeakHashTable.replace t key null
+        WeakHashTable.find t key |> shouldEqual (Some null)
+        WeakHashTable.mem t key |> shouldEqual true
+        WeakHashTable.keyIsUsingSpace t key |> shouldEqual true
+
+    [<Test>]
+    let ``null can be replaced with non-null and vice versa`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        let value = obj ()
+
+        // null -> non-null
+        WeakHashTable.replace t key null
+        WeakHashTable.find t key |> shouldEqual (Some null)
+        WeakHashTable.replace t key value
+        WeakHashTable.find t key |> shouldEqual (Some value)
+
+        // non-null -> null
+        WeakHashTable.replace t key null
+        WeakHashTable.find t key |> shouldEqual (Some null)
+        GC.KeepAlive value
+
+    [<Test>]
+    let ``addThrowing rejects duplicate null`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        WeakHashTable.addThrowing t key null
+
+        let exc =
+            Assert.Throws<KeyAlreadyInUseException> (fun () -> WeakHashTable.addThrowing t key null)
+
+        exc.Data0 |> unbox<int> |> shouldEqual 1
+
+    [<Test>]
+    let ``findOrAdd stores null from defaultF`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        let result = WeakHashTable.findOrAdd t key (fun () -> null)
+        result |> shouldEqual null
+        WeakHashTable.mem t key |> shouldEqual true
+        WeakHashTable.find t key |> shouldEqual (Some null)
+
+    [<Test>]
+    let ``findOrAdd with existing null does not call defaultF`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        let mutable called = false
+        WeakHashTable.addThrowing t key null
+
+        let result =
+            WeakHashTable.findOrAdd
+                t
+                key
+                (fun () ->
+                    called <- true
+                    obj ()
+                )
+
+        result |> shouldEqual null
+        called |> shouldEqual false
+
+    [<Test>]
+    let ``null values do not trigger cleanup callback`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        let mutable callbacks = 0
+        WeakHashTable.setRunWhenUnusedData t (fun () -> callbacks <- callbacks + 1)
+        WeakHashTable.addThrowing t key null
+        forceGc ()
+        WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+        callbacks |> shouldEqual 0
+        WeakHashTable.mem t key |> shouldEqual true
+
+    [<Test>]
+    let ``remove works for null values`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        WeakHashTable.addThrowing t key null
+        WeakHashTable.mem t key |> shouldEqual true
+        WeakHashTable.remove t key
+        WeakHashTable.mem t key |> shouldEqual false
+        WeakHashTable.keyIsUsingSpace t key |> shouldEqual false
+
     // Test: findOrAdd and complex scenarios
     type Struct =
         {

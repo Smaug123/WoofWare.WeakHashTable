@@ -1,3 +1,10 @@
+WoofWare.WeakHashTable.KeyAlreadyInUseException inherit System.Exception, implements System.Collections.IStructuralEquatable
+WoofWare.WeakHashTable.KeyAlreadyInUseException..ctor [constructor]: obj
+WoofWare.WeakHashTable.KeyAlreadyInUseException..ctor [constructor]: unit
+WoofWare.WeakHashTable.KeyAlreadyInUseException.Data0 [property]: [read-only] obj
+WoofWare.WeakHashTable.KeyAlreadyInUseException.Equals [method]: (System.Exception, System.Collections.IEqualityComparer) -> bool
+WoofWare.WeakHashTable.KeyAlreadyInUseException.Equals [method]: System.Exception -> bool
+WoofWare.WeakHashTable.KeyAlreadyInUseException.get_Data0 [method]: unit -> obj
 WoofWare.WeakHashTable.WeakHashTable inherit obj
 WoofWare.WeakHashTable.WeakHashTable.addThrowing [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> 'Key -> 'Value -> unit
 WoofWare.WeakHashTable.WeakHashTable.clear [static method]: WoofWare.WeakHashTable.WeakHashTable<'Key, 'Value> -> unit
