@@ -112,21 +112,68 @@ module WeakHashTable =
         =
         t.ThreadSafeRunWhenUnusedData <- threadSafeF
 
+    /// Tracks which keys reference a value; enqueues all on finalization.
+    /// When the value becomes unreachable, the ConditionalWeakTable releases this tracker,
+    /// triggering its finalizer which enqueues ALL keys that stored this value.
+    /// Uses ConcurrentDictionary for O(1) add/remove and automatic deduplication.
+    type private CleanupTracker<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (table : WeakHashTable<'Key, 'Value>)
+        =
+        let keys = ConcurrentDictionary<'Key, byte> ()
+
+        member _.AddKey (key : 'Key) = keys.TryAdd (key, 0uy) |> ignore<bool>
+
+        member _.RemoveKey (key : 'Key) = keys.TryRemove key |> ignore
+
+        override _.Finalize () =
+            try
+                for k in keys.Keys do
+                    table.KeysWithUnusedData.Enqueue k
+
+                table.ThreadSafeRunWhenUnusedData ()
+            with _ ->
+                ()
+
+    /// Removes key from its current value's tracker (if any and if different from newValue).
+    /// Call this before removing or replacing a key's entry to avoid retaining the key in the old tracker.
+    let private detachKeyFromOldValue<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        (newValue : 'Value voption)
+        : unit
+        =
+        match t.EntryByKey.TryGetValue key with
+        | true, entry ->
+            match entry.Target with
+            | :? 'Value as oldValue ->
+                let shouldDetach =
+                    match newValue with
+                    | ValueSome nv -> not (Object.referenceEquals oldValue nv)
+                    | ValueNone -> true
+
+                if shouldDetach then
+                    match t.CleanupTable.TryGetValue oldValue with
+                    | true, trackerObj -> (trackerObj :?> CleanupTracker<'Key, 'Value>).RemoveKey key
+                    | false, _ -> ()
+            | _ -> ()
+        | false, _ -> ()
+
     /// Removes a key from the table.
-    /// Note: This does not cancel any pending finalization callback for the value. If the value
-    /// becomes unreachable after removal, the ThreadSafeRunWhenUnusedData callback will still fire.
+    /// The key is also removed from its value's cleanup tracker, so it won't be enqueued
+    /// when the value is finalized.
     let remove<'Key, 'Value when 'Key : equality and 'Value : not struct>
         (t : WeakHashTable<'Key, 'Value>)
         (key : 'Key)
         : unit
         =
+        detachKeyFromOldValue t key ValueNone
         t.EntryByKey.Remove key |> ignore<bool>
         t.NullValueKeys.Remove key |> ignore<bool>
 
     /// Clears all entries from the table.
-    /// Note: This does not cancel any pending finalization callbacks for values. If values
-    /// become unreachable after clearing, the ThreadSafeRunWhenUnusedData callback will still fire
-    /// for each one.
+    /// Note: Keys may be retained in their values' cleanup trackers until those values are GC'd.
+    /// This is by design to avoid O(n) iteration; the keys won't cause functional issues since
+    /// reclaimSpaceForKeysWithUnusedData will find no entries for them.
     let clear<'Key, 'Value when 'Key : equality and 'Value : not struct> (t : WeakHashTable<'Key, 'Value>) : unit =
         t.EntryByKey.Clear ()
         t.NullValueKeys.Clear ()
@@ -147,24 +194,6 @@ module WeakHashTable =
             | false, _ -> ()
 
         processQueue ()
-
-    /// Tracks which keys reference a value; enqueues all on finalization.
-    /// When the value becomes unreachable, the ConditionalWeakTable releases this tracker,
-    /// triggering its finalizer which enqueues ALL keys that stored this value.
-    type private CleanupTracker<'Key, 'Value when 'Key : equality and 'Value : not struct>
-        (table : WeakHashTable<'Key, 'Value>) =
-        let keys = ConcurrentBag<'Key>()
-
-        member _.AddKey(key : 'Key) = keys.Add key
-
-        override _.Finalize() =
-            try
-                for k in keys do
-                    table.KeysWithUnusedData.Enqueue k
-
-                table.ThreadSafeRunWhenUnusedData()
-            with _ ->
-                ()
 
     /// Gets or creates a weak reference entry for a key
     let private getEntry<'Key, 'Value when 'Key : equality and 'Value : not struct>
@@ -218,12 +247,13 @@ module WeakHashTable =
             // New value - create a tracker and register it.
             // The tracker is stored in t.CleanupTable (rooted) with data as key.
             // When data becomes unreachable, the CWT releases the tracker, triggering its finalizer.
-            let tracker = CleanupTracker<'Key, 'Value>(t)
+            let tracker = CleanupTracker<'Key, 'Value> (t)
             tracker.AddKey key
-            t.CleanupTable.Add(data, tracker)
+            t.CleanupTable.Add (data, tracker)
             entry.Target <- data
 
-    /// Replaces the value for a key
+    /// Replaces the value for a key.
+    /// The key is removed from the old value's tracker (if different) to avoid key retention.
     let replace<'Key, 'Value when 'Key : equality and 'Value : not struct>
         (t : WeakHashTable<'Key, 'Value>)
         (key : 'Key)
@@ -231,12 +261,14 @@ module WeakHashTable =
         : unit
         =
         if Object.isNull data then
-            // Null value: store in NullValueKeys, remove from EntryByKey
+            // Null value: remove from old tracker, store in NullValueKeys, remove from EntryByKey
+            detachKeyFromOldValue t key ValueNone
             t.NullValueKeys.Add key |> ignore<bool>
             t.EntryByKey.Remove key |> ignore<bool>
         else
-            // Non-null value: store in EntryByKey, remove from NullValueKeys
+            // Non-null value: remove from old tracker if different, store in EntryByKey, remove from NullValueKeys
             t.NullValueKeys.Remove key |> ignore<bool>
+            detachKeyFromOldValue t key (ValueSome data)
             // Check if an entry already existed BEFORE calling getEntry
             let entryExisted = t.EntryByKey.ContainsKey key
             let entry = getEntry t key
