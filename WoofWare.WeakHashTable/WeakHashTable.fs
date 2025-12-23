@@ -46,6 +46,8 @@ type WeakHashTable<'Key, 'Value when 'Key : equality and 'Value : not struct> =
             EntryByKey : Dictionary<'Key, WeakReference>
             KeysWithUnusedData : ConcurrentQueue<'Key>
             mutable ThreadSafeRunWhenUnusedData : unit -> unit
+            /// Weak table that ties finalizer objects to values. Must be rooted to prevent premature collection.
+            CleanupTable : ConditionalWeakTable<'Value, Object>
         }
 
 /// Visitor for a WeakHashTable, intended for use with WeakHashTableCrate.
@@ -78,6 +80,7 @@ module WeakHashTable =
             EntryByKey = Dictionary<'Key, WeakReference> (defaultArg initialCapacity 0)
             KeysWithUnusedData = ConcurrentQueue<'Key> ()
             ThreadSafeRunWhenUnusedData = ignore
+            CleanupTable = ConditionalWeakTable<'Value, Object> ()
         }
 
     /// Sets the callback to run when unused data is detected
@@ -158,9 +161,9 @@ module WeakHashTable =
         =
         entry.Target <- data
 
-        // Register a finalizer to enqueue the key when the value is collected
-        let cleanup = ConditionalWeakTable<'Value, Object> ()
-
+        // Register a finalizer to enqueue the key when the value is collected.
+        // The callbackObj is stored in t.CleanupTable (rooted) with data as key.
+        // When data becomes unreachable, the CWT releases callbackObj, triggering its finalizer.
         let callbackObj =
             { new Object() with
                 override _.Finalize () =
@@ -171,7 +174,7 @@ module WeakHashTable =
                         ()
             }
 
-        cleanup.Add (data, callbackObj)
+        t.CleanupTable.Add (data, callbackObj)
 
     /// Replaces the value for a key
     let replace<'Key, 'Value when 'Key : equality and 'Value : not struct>
