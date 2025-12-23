@@ -148,6 +148,24 @@ module WeakHashTable =
 
         processQueue ()
 
+    /// Tracks which keys reference a value; enqueues all on finalization.
+    /// When the value becomes unreachable, the ConditionalWeakTable releases this tracker,
+    /// triggering its finalizer which enqueues ALL keys that stored this value.
+    type private CleanupTracker<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (table : WeakHashTable<'Key, 'Value>) =
+        let keys = ConcurrentBag<'Key>()
+
+        member _.AddKey(key : 'Key) = keys.Add key
+
+        override _.Finalize() =
+            try
+                for k in keys do
+                    table.KeysWithUnusedData.Enqueue k
+
+                table.ThreadSafeRunWhenUnusedData()
+            with _ ->
+                ()
+
     /// Gets or creates a weak reference entry for a key
     let private getEntry<'Key, 'Value when 'Key : equality and 'Value : not struct>
         (t : WeakHashTable<'Key, 'Value>)
@@ -181,9 +199,8 @@ module WeakHashTable =
         t.NullValueKeys.Contains key || t.EntryByKey.ContainsKey key
 
     /// Sets data for an entry and registers finalizer.
-    /// Note: CleanupTable.Add is performed before mutating entry.Target to ensure atomicity.
-    /// If the same value object is already tracked (e.g., stored under another key), Add throws
-    /// and we leave the entry unchanged.
+    /// If the value is already tracked (stored under another key), adds this key to the existing
+    /// tracker so ALL keys will be enqueued when the value is collected.
     let private setData<'Key, 'Value when 'Key : equality and 'Value : not struct>
         (t : WeakHashTable<'Key, 'Value>)
         (key : 'Key)
@@ -191,24 +208,20 @@ module WeakHashTable =
         (data : 'Value)
         : unit
         =
-        // Register a finalizer to enqueue the key when the value is collected.
-        // The callbackObj is stored in t.CleanupTable (rooted) with data as key.
-        // When data becomes unreachable, the CWT releases callbackObj, triggering its finalizer.
-        //
-        // IMPORTANT: Register cleanup BEFORE setting entry.Target. If Add throws (e.g., duplicate
-        // value object), we must not leave the entry in a half-initialized state.
-        let callbackObj =
-            { new Object() with
-                override _.Finalize () =
-                    try
-                        t.KeysWithUnusedData.Enqueue key
-                        t.ThreadSafeRunWhenUnusedData ()
-                    with _ ->
-                        ()
-            }
-
-        t.CleanupTable.Add (data, callbackObj)
-        entry.Target <- data
+        // Check if this value is already being tracked (stored under another key)
+        match t.CleanupTable.TryGetValue data with
+        | true, existingObj ->
+            // Value already tracked - add this key to the existing tracker
+            (existingObj :?> CleanupTracker<'Key, 'Value>).AddKey key
+            entry.Target <- data
+        | false, _ ->
+            // New value - create a tracker and register it.
+            // The tracker is stored in t.CleanupTable (rooted) with data as key.
+            // When data becomes unreachable, the CWT releases the tracker, triggering its finalizer.
+            let tracker = CleanupTracker<'Key, 'Value>(t)
+            tracker.AddKey key
+            t.CleanupTable.Add(data, tracker)
+            entry.Target <- data
 
     /// Replaces the value for a key
     let replace<'Key, 'Value when 'Key : equality and 'Value : not struct>

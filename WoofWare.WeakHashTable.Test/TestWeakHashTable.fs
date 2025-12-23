@@ -382,7 +382,7 @@ module TestWeakHashTable =
         isAbsent k3 |> shouldEqual true
 
     [<Test>]
-    let ``addThrowing with duplicate value does not leave tombstone`` () =
+    let ``addThrowing allows duplicate value under multiple keys`` () =
         let t = WeakHashTable.create<int, obj> None
         let key1 = 1
         let key2 = 2
@@ -391,23 +391,21 @@ module TestWeakHashTable =
         // Add value under key1
         WeakHashTable.addThrowing t key1 value
 
-        // Try to add the same value under key2 - should throw because
-        // ConditionalWeakTable doesn't allow duplicate keys
-        Assert.Throws<ArgumentException> (fun () -> WeakHashTable.addThrowing t key2 value)
-        |> ignore
+        // Add the same value under key2 - should succeed
+        WeakHashTable.addThrowing t key2 value
 
-        // key2 should NOT be using space (before fix, it would leave a tombstone)
-        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
-        WeakHashTable.mem t key2 |> shouldEqual false
-
-        // key1 should still have the value
+        // Both keys should have the value
         WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual true
         WeakHashTable.mem t key1 |> shouldEqual true
         WeakHashTable.find t key1 |> shouldEqual (Some value)
+
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual true
+        WeakHashTable.mem t key2 |> shouldEqual true
+        WeakHashTable.find t key2 |> shouldEqual (Some value)
         GC.KeepAlive value
 
     [<Test>]
-    let ``findOrAdd with duplicate value does not leave tombstone`` () =
+    let ``findOrAdd allows duplicate value under multiple keys`` () =
         let t = WeakHashTable.create<int, obj> None
         let key1 = 1
         let key2 = 2
@@ -416,23 +414,22 @@ module TestWeakHashTable =
         // Add value under key1
         WeakHashTable.addThrowing t key1 value
 
-        // Try to add the same value under key2 via findOrAdd - should throw because
-        // ConditionalWeakTable doesn't allow duplicate keys
-        Assert.Throws<ArgumentException> (fun () -> WeakHashTable.findOrAdd t key2 (fun () -> value) |> ignore)
-        |> ignore
+        // Add the same value under key2 via findOrAdd - should succeed
+        let result = WeakHashTable.findOrAdd t key2 (fun () -> value)
+        result |> shouldEqual value
 
-        // key2 should NOT be using space (before fix, it would leave a tombstone)
-        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
-        WeakHashTable.mem t key2 |> shouldEqual false
-
-        // key1 should still have the value
+        // Both keys should have the value
         WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual true
         WeakHashTable.mem t key1 |> shouldEqual true
         WeakHashTable.find t key1 |> shouldEqual (Some value)
+
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual true
+        WeakHashTable.mem t key2 |> shouldEqual true
+        WeakHashTable.find t key2 |> shouldEqual (Some value)
         GC.KeepAlive value
 
     [<Test>]
-    let ``replace with duplicate value throws and leaves no tombstone`` () =
+    let ``replace allows duplicate value under multiple keys`` () =
         let t = WeakHashTable.create<int, obj> None
         let key1 = 1
         let key2 = 2
@@ -441,20 +438,59 @@ module TestWeakHashTable =
         // Add value under key1
         WeakHashTable.addThrowing t key1 value
 
-        // Try to replace key2 with the same value - should throw because
-        // ConditionalWeakTable doesn't allow duplicate keys
-        Assert.Throws<ArgumentException> (fun () -> WeakHashTable.replace t key2 value)
-        |> ignore
+        // Replace key2 with the same value - should succeed
+        WeakHashTable.replace t key2 value
 
-        // key2 should NOT be using space
-        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
-        WeakHashTable.mem t key2 |> shouldEqual false
-
-        // key1 should still have the value
+        // Both keys should have the value
         WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual true
         WeakHashTable.mem t key1 |> shouldEqual true
         WeakHashTable.find t key1 |> shouldEqual (Some value)
+
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual true
+        WeakHashTable.mem t key2 |> shouldEqual true
+        WeakHashTable.find t key2 |> shouldEqual (Some value)
         GC.KeepAlive value
+
+    [<Test>]
+    let ``duplicate value cleanup reclaims all keys`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key1 = 1
+        let key2 = 2
+        let key3 = 3
+        let mutable callbacks = 0
+
+        WeakHashTable.setRunWhenUnusedData t (fun () -> callbacks <- callbacks + 1)
+
+        // Add the same value under three keys (use a scope so we can let it be collected)
+        do
+            let value = obj ()
+            WeakHashTable.addThrowing t key1 value
+            WeakHashTable.addThrowing t key2 value
+            WeakHashTable.replace t key3 value
+
+            // All should be present
+            WeakHashTable.mem t key1 |> shouldEqual true
+            WeakHashTable.mem t key2 |> shouldEqual true
+            WeakHashTable.mem t key3 |> shouldEqual true
+
+            GC.KeepAlive value
+
+        // Force GC to finalize the value
+        forceGc ()
+
+        // Callback should have fired exactly once (one finalizer for the shared tracker)
+        callbacks |> shouldEqual 1
+
+        // Run reclaim - ALL keys should be reclaimed
+        WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+
+        // All keys should be gone
+        WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual false
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
+        WeakHashTable.keyIsUsingSpace t key3 |> shouldEqual false
+        WeakHashTable.mem t key1 |> shouldEqual false
+        WeakHashTable.mem t key2 |> shouldEqual false
+        WeakHashTable.mem t key3 |> shouldEqual false
 
     [<Test>]
     let ``clear preserves null values until explicitly cleared`` () =
@@ -547,3 +583,75 @@ module TestWeakHashTable =
         WeakHashTable.mem t key |> shouldEqual true
         WeakHashTable.find t key |> shouldEqual (Some null)
         WeakHashTable.keyIsUsingSpace t key |> shouldEqual true
+
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    let private addSharedAndReplace (t : WeakHashTable<int, obj>) key1 key2 (value2 : obj) =
+        let sharedValue = obj ()
+        WeakHashTable.addThrowing t key1 sharedValue
+        WeakHashTable.addThrowing t key2 sharedValue
+        // Replace key1 with a different value - key1 now has value2, key2 still has sharedValue
+        WeakHashTable.replace t key1 value2
+
+    [<Test>]
+    let ``shared value replaced on one key does not reclaim the replaced key`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key1 = 1
+        let key2 = 2
+        let mutable callbacks = 0
+        let value2 = obj ()
+
+        WeakHashTable.setRunWhenUnusedData t (fun () -> callbacks <- callbacks + 1)
+
+        // Add a shared value under two keys, then replace one key with value2
+        addSharedAndReplace t key1 key2 value2
+
+        // key1 should have value2, key2 should have sharedValue (still alive until GC)
+        WeakHashTable.mem t key1 |> shouldEqual true
+        WeakHashTable.mem t key2 |> shouldEqual true
+        WeakHashTable.find t key1 |> shouldEqual (Some value2)
+
+        // sharedValue is now unreachable - force GC to finalize it
+        forceGc ()
+
+        // Callback should have fired for sharedValue
+        callbacks |> shouldEqual 1
+
+        // The cleanup tracker for sharedValue has both key1 and key2 enqueued.
+        // But key1 now has value2 (alive), so reclaim should NOT remove key1.
+        // key2 had sharedValue (now dead), so reclaim SHOULD remove key2.
+        WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+
+        // key1 should survive with value2
+        WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual true
+        WeakHashTable.mem t key1 |> shouldEqual true
+        WeakHashTable.find t key1 |> shouldEqual (Some value2)
+
+        // key2 should be reclaimed (sharedValue was collected)
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
+        WeakHashTable.mem t key2 |> shouldEqual false
+
+        GC.KeepAlive value2
+
+    [<Test>]
+    let ``addThrowing rejects duplicate non-null on same key`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        let value1 = obj ()
+        let value2 = obj ()
+
+        // Add first value
+        WeakHashTable.addThrowing t key value1
+
+        // Try to add a different value under the same key - should throw KeyAlreadyInUseException
+        let exc =
+            Assert.Throws<KeyAlreadyInUseException> (fun () -> WeakHashTable.addThrowing t key value2)
+
+        exc.Data0 |> unbox<int> |> shouldEqual key
+
+        // Original value should still be there
+        WeakHashTable.find t key |> shouldEqual (Some value1)
+        WeakHashTable.mem t key |> shouldEqual true
+        WeakHashTable.keyIsUsingSpace t key |> shouldEqual true
+
+        GC.KeepAlive value1
+        GC.KeepAlive value2
