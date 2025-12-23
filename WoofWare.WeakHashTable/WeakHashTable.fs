@@ -238,8 +238,14 @@ module WeakHashTable =
             raise (KeyAlreadyInUseException key)
 
         if Object.isNull data then
-            // Null value: just add to NullValueKeys
-            t.NullValueKeys.Add key |> ignore<bool>
+            // Check if key already has a live non-null value
+            match t.EntryByKey.TryGetValue key with
+            | true, entry when entry.IsAlive -> raise (KeyAlreadyInUseException key)
+            | _ ->
+                // Remove any dead entry to prevent reclaim from accidentally
+                // removing our new null value, then add to NullValueKeys
+                t.EntryByKey.Remove key |> ignore<bool>
+                t.NullValueKeys.Add key |> ignore<bool>
         else
             let entry = getEntry t key
 
