@@ -372,3 +372,53 @@ module TestWeakHashTable =
         stabilize ()
 
         isAbsent k3 |> shouldEqual true
+
+    [<Test>]
+    let ``addThrowing with duplicate value does not leave tombstone`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key1 = 1
+        let key2 = 2
+        let value = obj ()
+
+        // Add value under key1
+        WeakHashTable.addThrowing t key1 value
+
+        // Try to add the same value under key2 - should throw because
+        // ConditionalWeakTable doesn't allow duplicate keys
+        Assert.Throws<ArgumentException> (fun () -> WeakHashTable.addThrowing t key2 value)
+        |> ignore
+
+        // key2 should NOT be using space (before fix, it would leave a tombstone)
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
+        WeakHashTable.mem t key2 |> shouldEqual false
+
+        // key1 should still have the value
+        WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual true
+        WeakHashTable.mem t key1 |> shouldEqual true
+        WeakHashTable.find t key1 |> shouldEqual (Some value)
+        GC.KeepAlive value
+
+    [<Test>]
+    let ``findOrAdd with duplicate value does not leave tombstone`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key1 = 1
+        let key2 = 2
+        let value = obj ()
+
+        // Add value under key1
+        WeakHashTable.addThrowing t key1 value
+
+        // Try to add the same value under key2 via findOrAdd - should throw because
+        // ConditionalWeakTable doesn't allow duplicate keys
+        Assert.Throws<ArgumentException> (fun () -> WeakHashTable.findOrAdd t key2 (fun () -> value) |> ignore)
+        |> ignore
+
+        // key2 should NOT be using space (before fix, it would leave a tombstone)
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
+        WeakHashTable.mem t key2 |> shouldEqual false
+
+        // key1 should still have the value
+        WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual true
+        WeakHashTable.mem t key1 |> shouldEqual true
+        WeakHashTable.find t key1 |> shouldEqual (Some value)
+        GC.KeepAlive value
