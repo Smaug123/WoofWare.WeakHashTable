@@ -247,12 +247,21 @@ module WeakHashTable =
                 t.EntryByKey.Remove key |> ignore<bool>
                 t.NullValueKeys.Add key |> ignore<bool>
         else
+            // Check if an entry already existed BEFORE calling getEntry
+            let entryExisted = t.EntryByKey.ContainsKey key
             let entry = getEntry t key
 
             if entry.IsAlive then
                 raise (KeyAlreadyInUseException key)
 
-            setData t key entry data
+            try
+                setData t key entry data
+            with _ ->
+                // If setData throws and we created a new entry, clean it up
+                if not entryExisted then
+                    t.EntryByKey.Remove key |> ignore<bool>
+
+                reraise ()
 
     /// Finds the value associated with a key
     let find<'Key, 'Value when 'Key : equality and 'Value : not struct>
@@ -307,6 +316,12 @@ module WeakHashTable =
                 else
                     let entry = WeakReference (null : obj)
                     t.EntryByKey.[key] <- entry
-                    setData t key entry data
+
+                    try
+                        setData t key entry data
+                    with _ ->
+                        // If setData throws after we created a new entry, clean it up
+                        t.EntryByKey.Remove key |> ignore<bool>
+                        reraise ()
 
                 data
