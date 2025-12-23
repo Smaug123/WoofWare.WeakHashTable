@@ -222,6 +222,21 @@ module TestWeakHashTable =
         exc.Data0 |> unbox<int> |> shouldEqual 1
 
     [<Test>]
+    let ``addThrowing rejects null when key has live non-null value`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        let value = obj ()
+        WeakHashTable.addThrowing t key value
+
+        let exc =
+            Assert.Throws<KeyAlreadyInUseException> (fun () -> WeakHashTable.addThrowing t key null)
+
+        exc.Data0 |> unbox<int> |> shouldEqual 1
+        // Verify the original value is still there
+        WeakHashTable.find t key |> shouldEqual (Some value)
+        GC.KeepAlive value
+
+    [<Test>]
     let ``findOrAdd stores null from defaultF`` () =
         let t = WeakHashTable.create<int, obj> None
         let key = 1
