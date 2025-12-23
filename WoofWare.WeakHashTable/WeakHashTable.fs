@@ -45,6 +45,14 @@ exception KeyAlreadyInUseException of obj
 ///    At this point, the data associated with [key] is unreachable (since all we did with it
 ///    was project out field [bar]), so it may disappear from the table at any time. *)
 /// </remarks>
+/// <remarks>
+///    <b>Callback lifetime:</b> The [ThreadSafeRunWhenUnusedData] callback is tied to the
+///    <i>value's</i> lifetime, not the table entry's lifetime. If you [remove] a key or [clear]
+///    the table, the callback may still fire later when the value object is garbage collected
+///    (assuming no other strong references keep it alive). This is by design: the callback
+///    signals "this value is no longer referenced anywhere," which remains meaningful even
+///    after the entry is removed from the table.
+/// </remarks>
 type WeakHashTable<'Key, 'Value when 'Key : equality and 'Value : not struct> =
     private
         {
@@ -92,7 +100,11 @@ module WeakHashTable =
             CleanupTable = ConditionalWeakTable<'Value, Object> ()
         }
 
-    /// Sets the callback to run when unused data is detected
+    /// Sets the callback to run when unused data is detected.
+    /// The callback fires when a value object is garbage collected (i.e., becomes unreachable).
+    /// This is tied to the value's lifetime, not the table entry's: the callback may fire even
+    /// after the key has been removed or the table cleared, as long as the value was previously
+    /// stored in the table and has now become unreachable.
     let setRunWhenUnusedData<'Key, 'Value when 'Key : equality and 'Value : not struct>
         (t : WeakHashTable<'Key, 'Value>)
         (threadSafeF : unit -> unit)
@@ -100,7 +112,9 @@ module WeakHashTable =
         =
         t.ThreadSafeRunWhenUnusedData <- threadSafeF
 
-    /// Removes a key from the table
+    /// Removes a key from the table.
+    /// Note: This does not cancel any pending finalization callback for the value. If the value
+    /// becomes unreachable after removal, the ThreadSafeRunWhenUnusedData callback will still fire.
     let remove<'Key, 'Value when 'Key : equality and 'Value : not struct>
         (t : WeakHashTable<'Key, 'Value>)
         (key : 'Key)
@@ -109,7 +123,10 @@ module WeakHashTable =
         t.EntryByKey.Remove key |> ignore<bool>
         t.NullValueKeys.Remove key |> ignore<bool>
 
-    /// Clears all entries from the table
+    /// Clears all entries from the table.
+    /// Note: This does not cancel any pending finalization callbacks for values. If values
+    /// become unreachable after clearing, the ThreadSafeRunWhenUnusedData callback will still fire
+    /// for each one.
     let clear<'Key, 'Value when 'Key : equality and 'Value : not struct> (t : WeakHashTable<'Key, 'Value>) : unit =
         t.EntryByKey.Clear ()
         t.NullValueKeys.Clear ()
@@ -163,7 +180,10 @@ module WeakHashTable =
         =
         t.NullValueKeys.Contains key || t.EntryByKey.ContainsKey key
 
-    /// Sets data for an entry and registers finalizer
+    /// Sets data for an entry and registers finalizer.
+    /// Note: CleanupTable.Add is performed before mutating entry.Target to ensure atomicity.
+    /// If the same value object is already tracked (e.g., stored under another key), Add throws
+    /// and we leave the entry unchanged.
     let private setData<'Key, 'Value when 'Key : equality and 'Value : not struct>
         (t : WeakHashTable<'Key, 'Value>)
         (key : 'Key)
@@ -171,11 +191,12 @@ module WeakHashTable =
         (data : 'Value)
         : unit
         =
-        entry.Target <- data
-
         // Register a finalizer to enqueue the key when the value is collected.
         // The callbackObj is stored in t.CleanupTable (rooted) with data as key.
         // When data becomes unreachable, the CWT releases callbackObj, triggering its finalizer.
+        //
+        // IMPORTANT: Register cleanup BEFORE setting entry.Target. If Add throws (e.g., duplicate
+        // value object), we must not leave the entry in a half-initialized state.
         let callbackObj =
             { new Object() with
                 override _.Finalize () =
@@ -187,6 +208,7 @@ module WeakHashTable =
             }
 
         t.CleanupTable.Add (data, callbackObj)
+        entry.Target <- data
 
     /// Replaces the value for a key
     let replace<'Key, 'Value when 'Key : equality and 'Value : not struct>
