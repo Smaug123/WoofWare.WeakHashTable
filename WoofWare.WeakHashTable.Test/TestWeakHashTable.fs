@@ -744,3 +744,72 @@ module TestWeakHashTable =
         keyWeak.IsAlive |> shouldEqual false
 
         GC.KeepAlive value
+
+    [<Test>]
+    let ``addThrowing rejects non-null when key has null value`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 1
+        let value = obj ()
+
+        // First add null value
+        WeakHashTable.addThrowing t key null
+
+        // Verify null is stored
+        WeakHashTable.mem t key |> shouldEqual true
+        WeakHashTable.find t key |> shouldEqual (Some null)
+
+        // Try to add a non-null value - should throw because key already has a (null) value
+        let exc =
+            Assert.Throws<KeyAlreadyInUseException> (fun () -> WeakHashTable.addThrowing t key value)
+
+        exc.Data0 |> unbox<int> |> shouldEqual key
+
+        // Original null value should still be there
+        WeakHashTable.find t key |> shouldEqual (Some null)
+        WeakHashTable.mem t key |> shouldEqual true
+
+        GC.KeepAlive value
+
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    let private addSharedAndRemoveOneKey (t : WeakHashTable<int, obj>) key1 key2 =
+        let sharedValue = obj ()
+        WeakHashTable.addThrowing t key1 sharedValue
+        WeakHashTable.addThrowing t key2 sharedValue
+        // Remove key1 - key2 still has sharedValue
+        WeakHashTable.remove t key1
+
+    [<Test>]
+    let ``shared value removed on one key leaves other key intact until value dies`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key1 = 1
+        let key2 = 2
+        let mutable callbacks = 0
+
+        WeakHashTable.setRunWhenUnusedData t (fun () -> callbacks <- callbacks + 1)
+
+        // Add a shared value under two keys, then remove one key
+        addSharedAndRemoveOneKey t key1 key2
+
+        // key1 should be removed, key2 should still have sharedValue (alive until GC)
+        WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual false
+        WeakHashTable.mem t key1 |> shouldEqual false
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual true
+        WeakHashTable.mem t key2 |> shouldEqual true
+
+        // sharedValue is now unreachable - force GC to finalize it
+        forceGc ()
+
+        // Callback should have fired for sharedValue
+        callbacks |> shouldEqual 1
+
+        // Only key2 should be enqueued (key1 was detached from tracker on remove).
+        // After reclaim, key2 should be removed.
+        WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+
+        // key1 was already removed
+        WeakHashTable.keyIsUsingSpace t key1 |> shouldEqual false
+        WeakHashTable.mem t key1 |> shouldEqual false
+
+        // key2 should now be reclaimed (sharedValue was collected)
+        WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
+        WeakHashTable.mem t key2 |> shouldEqual false
