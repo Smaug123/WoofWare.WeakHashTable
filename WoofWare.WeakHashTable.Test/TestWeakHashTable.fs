@@ -2,6 +2,7 @@
 namespace WoofWare.WeakHashTable.Test
 
 open System
+open System.Runtime.CompilerServices
 open WoofWare.WeakHashTable
 open NUnit.Framework
 open FsUnitTyped
@@ -14,6 +15,15 @@ module TestWeakHashTable =
         GC.Collect ()
 
     let data (i : int) = ref i
+
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    let addNoInline<'Key, 'Value when 'Key : equality and 'Value : not struct>
+        (t : WeakHashTable<'Key, 'Value>)
+        (key : 'Key)
+        (value : 'Value)
+        : unit
+        =
+        WeakHashTable.addThrowing t key value
 
     [<OneTimeSetUp>]
     let oneTimeSetup () =
@@ -113,6 +123,66 @@ module TestWeakHashTable =
 
         forceGc ()
         ran.Value |> shouldEqual true
+
+    [<Test>]
+    let ``reclaim does not lose later cleanup`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 41
+        let mutable value = obj ()
+        let callbacks = ref 0
+
+        WeakHashTable.setRunWhenUnusedData t (fun () -> callbacks.Value <- callbacks.Value + 1)
+
+        let gcPressure () =
+            let junk = Array.zeroCreate<obj> 10000
+
+            for i = 0 to junk.Length - 1 do
+                junk.[i] <- obj ()
+
+            GC.KeepAlive junk
+
+        addNoInline t key value
+
+        // Run reclamation while the value is still strongly referenced.
+        for _ = 1 to 5 do
+            gcPressure ()
+            forceGc ()
+            WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+            callbacks.Value |> shouldEqual 0
+            WeakHashTable.keyIsUsingSpace t key |> shouldEqual true
+            WeakHashTable.mem t key |> shouldEqual true
+            GC.KeepAlive value
+
+        callbacks.Value |> shouldEqual 0
+        GC.KeepAlive value
+        value <- (null : obj)
+
+        forceGc ()
+        WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+
+        callbacks.Value |> shouldEqual 1
+        WeakHashTable.keyIsUsingSpace t key |> shouldEqual false
+        WeakHashTable.mem t key |> shouldEqual false
+
+    [<Test>]
+    let ``null values do not leave inconsistent state`` () =
+        let t = WeakHashTable.create<int, obj> None
+        let key = 99
+
+        let outcome =
+            try
+                WeakHashTable.addThrowing t key null
+                Choice1Of2 ()
+            with _ ->
+                Choice2Of2 ()
+
+        match outcome with
+        | Choice1Of2 () ->
+            WeakHashTable.find t key |> shouldEqual (Some null)
+            WeakHashTable.mem t key |> shouldEqual true
+        | Choice2Of2 () ->
+            WeakHashTable.keyIsUsingSpace t key |> shouldEqual false
+            WeakHashTable.mem t key |> shouldEqual false
 
     // Test: findOrAdd and complex scenarios
     type Struct =
