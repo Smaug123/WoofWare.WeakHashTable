@@ -828,3 +828,122 @@ module TestWeakHashTable =
         // key2 should now be reclaimed (sharedValue was collected)
         WeakHashTable.keyIsUsingSpace t key2 |> shouldEqual false
         WeakHashTable.mem t key2 |> shouldEqual false
+
+    [<Test>]
+    let ``entries survive internal dictionary resize`` () =
+        // .NET Dictionary starts with capacity 0 and resizes at load factor ~0.75
+        // Typical resize sequence: 3 -> 7 -> 17 -> 37 -> 71 -> ...
+        // Adding 1000 entries should trigger multiple resizes.
+        let t = WeakHashTable.create<int, int ref> None
+        let count = 1000
+
+        // Keep strong references to all values to prevent GC collection
+        let values = Array.init count (fun i -> ref i)
+
+        // Add all entries
+        for i = 0 to count - 1 do
+            WeakHashTable.addThrowing t i values.[i]
+
+        // Verify all entries are present and have correct values
+        for i = 0 to count - 1 do
+            WeakHashTable.mem t i |> shouldEqual true
+            WeakHashTable.keyIsUsingSpace t i |> shouldEqual true
+
+            match WeakHashTable.find t i with
+            | Some v ->
+                v.Value |> shouldEqual i
+                Object.ReferenceEquals (v, values.[i]) |> shouldEqual true
+            | None -> failwith $"Entry %d{i} should be present after resize"
+
+        // Verify table operations still work after resizes
+        // Replace some entries
+        for i in [ 0 ; 100 ; 500 ; 999 ] do
+            let newValue = ref (i * 10)
+            values.[i] <- newValue
+            WeakHashTable.replace t i newValue
+
+        // Verify replacements
+        for i in [ 0 ; 100 ; 500 ; 999 ] do
+            match WeakHashTable.find t i with
+            | Some v -> v.Value |> shouldEqual (i * 10)
+            | None -> failwith $"Entry %d{i} should be present after replace"
+
+        // Remove some entries
+        for i in [ 1 ; 101 ; 501 ] do
+            WeakHashTable.remove t i
+            WeakHashTable.mem t i |> shouldEqual false
+            WeakHashTable.keyIsUsingSpace t i |> shouldEqual false
+
+        // Verify remaining entries still accessible
+        for i = 0 to count - 1 do
+            if i = 1 || i = 101 || i = 501 then
+                WeakHashTable.mem t i |> shouldEqual false
+            else
+                WeakHashTable.mem t i |> shouldEqual true
+
+        GC.KeepAlive values
+
+    [<Test>]
+    let ``entries survive resize starting from small initial capacity`` () =
+        // Start with initial capacity of 1 to force many resizes
+        let t = WeakHashTable.create<int, int ref> (Some 1)
+        let count = 500
+
+        let values = Array.init count (fun i -> ref i)
+
+        for i = 0 to count - 1 do
+            WeakHashTable.addThrowing t i values.[i]
+
+        // Verify all entries survived the resizes
+        for i = 0 to count - 1 do
+            match WeakHashTable.find t i with
+            | Some v ->
+                v.Value |> shouldEqual i
+                Object.ReferenceEquals (v, values.[i]) |> shouldEqual true
+            | None -> failwith $"Entry %d{i} missing after resize from capacity 1"
+
+        GC.KeepAlive values
+
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    let private addEphemeralEntries (t : WeakHashTable<int, obj>) startKey count =
+        for i = startKey to startKey + count - 1 do
+            WeakHashTable.addThrowing t i (obj ())
+
+    [<Test>]
+    let ``resize does not break cleanup tracking`` () =
+        // Verify that entries added before and after resizes are properly tracked for cleanup
+        let t = WeakHashTable.create<int, obj> (Some 1)
+        let mutable callbacks = 0
+
+        WeakHashTable.setRunWhenUnusedData t (fun () -> callbacks <- callbacks + 1)
+
+        // Add enough entries to trigger resize, keeping strong refs
+        let keepAlive = ResizeArray<obj> ()
+
+        for i = 0 to 99 do
+            let value = obj ()
+            keepAlive.Add value
+            WeakHashTable.addThrowing t i value
+
+        // Now add some entries without keeping refs (they will be collected)
+        // Use NoInlining helper to ensure refs don't escape
+        addEphemeralEntries t 100 50
+
+        // Force GC multiple times to ensure collection
+        for _ = 1 to 3 do
+            forceGc ()
+            WeakHashTable.reclaimSpaceForKeysWithUnusedData t
+
+        // Callbacks should have fired (one per distinct value that was finalized)
+        callbacks |> shouldBeGreaterThan 0
+
+        // The 100 kept entries should still be present
+        for i = 0 to 99 do
+            WeakHashTable.mem t i |> shouldEqual true
+
+        // The 50 collected entries should be gone (check mem, not keyIsUsingSpace,
+        // as reclaim may not have processed all keys yet, but the weak refs are dead)
+        for i = 100 to 149 do
+            WeakHashTable.mem t i |> shouldEqual false
+
+        GC.KeepAlive keepAlive
