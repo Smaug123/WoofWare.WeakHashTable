@@ -105,6 +105,10 @@ module WeakHashTable =
     /// This is tied to the value's lifetime, not the table entry's: the callback may fire even
     /// after the key has been removed or the table cleared, as long as the value was previously
     /// stored in the table and has now become unreachable.
+    ///
+    /// WARNING: The callback runs on the finalizer thread. Do not call reclaimSpaceForKeysWithUnusedData
+    /// (or any other WeakHashTable operation) from within this callback, as doing so is not thread-safe
+    /// and may corrupt the table if concurrent access occurs from other threads.
     let setRunWhenUnusedData<'Key, 'Value when 'Key : equality and 'Value : not struct>
         (t : WeakHashTable<'Key, 'Value>)
         (threadSafeF : unit -> unit)
@@ -178,7 +182,11 @@ module WeakHashTable =
         t.EntryByKey.Clear ()
         t.NullValueKeys.Clear ()
 
-    /// Reclaims space for keys whose values have been garbage collected
+    /// Reclaims space for keys whose values have been garbage collected.
+    ///
+    /// WARNING: Do not call this from within the callback registered via setRunWhenUnusedData.
+    /// That callback runs on the finalizer thread, and calling this function from there is not
+    /// thread-safe: if other threads are accessing the table concurrently, data corruption may occur.
     let reclaimSpaceForKeysWithUnusedData<'Key, 'Value when 'Key : equality and 'Value : not struct>
         (t : WeakHashTable<'Key, 'Value>)
         : unit
