@@ -4,6 +4,12 @@
 [![GitHub Actions status](https://github.com/Smaug123/WoofWare.WeakHashTable/actions/workflows/dotnet.yaml/badge.svg)](https://github.com/Smaug123/WoofWare.WeakHashTable/actions?query=branch%3Amain)
 [![License file](https://img.shields.io/github/license/Smaug123/WoofWare.WeakHashTable)](./LICENCE.md)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logos/dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="logos/light.svg">
+  <img alt="Project logo: minimalistic face of a cartoon Shiba Inu; its right-hand edge is composed of neatly justified horizontal lines." src="logos/light.svg" width="300">
+</picture>
+
 This is the weak hash table from [janestreet/core_kernel](https://github.com/janestreet/core_kernel/tree/774a6821b14cbcdcde02cbbca1984ea32bf06184/weak_hashtbl).
 
 To quote the original documentation:
