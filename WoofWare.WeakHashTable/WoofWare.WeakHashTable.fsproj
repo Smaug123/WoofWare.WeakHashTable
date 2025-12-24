@@ -15,6 +15,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <Compile Include="Object.fs" />
       <Compile Include="WeakHashTable.fs" />
       <EmbeddedResource Include="SurfaceBaseline.txt" />
       <EmbeddedResource Include="../version.json" />
