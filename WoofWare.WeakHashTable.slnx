@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="WoofWare.WeakHashTable.Test/WoofWare.WeakHashTable.Test.fsproj" />
+  <Project Path="WoofWare.WeakHashTable/WoofWare.WeakHashTable.fsproj" />
+</Solution>
