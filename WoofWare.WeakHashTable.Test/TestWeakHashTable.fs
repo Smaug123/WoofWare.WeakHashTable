@@ -832,7 +832,7 @@ module TestWeakHashTable =
     [<Test>]
     let ``entries survive internal dictionary resize`` () =
         // .NET Dictionary starts with capacity 0 and resizes at load factor ~0.75
-        // Typical resize sequence: 3 -> 7 -> 17 -> 37 -> 71 -> ...
+        // Capacities are primes: 3 -> 7 -> 17 -> 37 -> 89 -> 197 -> ...
         // Adding 1000 entries should trigger multiple resizes.
         let t = WeakHashTable.create<int, int ref> None
         let count = 1000
@@ -914,6 +914,7 @@ module TestWeakHashTable =
         // Verify that entries added before and after resizes are properly tracked for cleanup
         let t = WeakHashTable.create<int, obj> (Some 1)
         let mutable callbacks = 0
+        let ephemeralCount = 50
 
         WeakHashTable.setRunWhenUnusedData t (fun () -> callbacks <- callbacks + 1)
 
@@ -927,23 +928,24 @@ module TestWeakHashTable =
 
         // Now add some entries without keeping refs (they will be collected)
         // Use NoInlining helper to ensure refs don't escape
-        addEphemeralEntries t 100 50
+        addEphemeralEntries t 100 ephemeralCount
 
-        // Force GC multiple times to ensure collection
-        for _ = 1 to 3 do
+        // Force GC multiple times to ensure collection and reclaim until queue is drained
+        for _ = 1 to 5 do
             forceGc ()
             WeakHashTable.reclaimSpaceForKeysWithUnusedData t
 
-        // Callbacks should have fired (one per distinct value that was finalized)
-        callbacks |> shouldBeGreaterThan 0
+        // All 50 distinct ephemeral values should have triggered exactly one callback each
+        callbacks |> shouldEqual ephemeralCount
 
         // The 100 kept entries should still be present
         for i = 0 to 99 do
             WeakHashTable.mem t i |> shouldEqual true
+            WeakHashTable.keyIsUsingSpace t i |> shouldEqual true
 
-        // The 50 collected entries should be gone (check mem, not keyIsUsingSpace,
-        // as reclaim may not have processed all keys yet, but the weak refs are dead)
-        for i = 100 to 149 do
+        // The 50 collected entries should be fully reclaimed (no space leak)
+        for i = 100 to 100 + ephemeralCount - 1 do
             WeakHashTable.mem t i |> shouldEqual false
+            WeakHashTable.keyIsUsingSpace t i |> shouldEqual false
 
         GC.KeepAlive keepAlive
