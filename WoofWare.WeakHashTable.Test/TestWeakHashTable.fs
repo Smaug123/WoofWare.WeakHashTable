@@ -684,35 +684,50 @@ module TestWeakHashTable =
         // Keep value alive so the tracker itself stays alive
         GC.KeepAlive value
 
-    /// Helper: add key to table with oldValue, then replace with newValue. Returns WeakReference to key.
+    /// Helper: add key to table with oldValue, then replace with newValue, then remove from table.
+    /// Returns WeakReference to key.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let private addKeyThenReplace (t : WeakHashTable<obj, obj>) (oldValue : obj) (newValue : obj) : WeakReference =
+    let private addKeyThenReplaceAndRemove
+        (t : WeakHashTable<obj, obj>)
+        (oldValue : obj)
+        (newValue : obj)
+        : WeakReference
+        =
         let key = obj ()
         WeakHashTable.addThrowing t key oldValue
         WeakHashTable.replace t key newValue
+        // Remove the key from the table - this detaches it from newValue's tracker
+        WeakHashTable.remove t key
         WeakReference key
 
     [<Test>]
     let ``replace releases reference-type key from old tracker (memory test)`` () =
         // This test verifies that replace detaches the key from the OLD value's tracker.
         // Without pruning, the old tracker would hold a strong reference to the key.
+        //
+        // Scenario:
+        // 1. Add key with oldValue (key is attached to oldValue's tracker)
+        // 2. Replace with newValue (key should be detached from oldValue's tracker, attached to newValue's)
+        // 3. Remove key from table (key is detached from newValue's tracker)
+        // 4. Keep oldValue alive, let newValue be collected
+        // 5. GC - if replace properly detached from oldValue's tracker, key should be collected
+        //         if replace is buggy, key would still be held by oldValue's tracker
         let t = WeakHashTable.create<obj, obj> None
         let oldValue = obj ()
-        let newValue = obj ()
 
-        let keyWeak = addKeyThenReplace t oldValue newValue
+        let keyWeak =
+            let newValue = obj ()
+            addKeyThenReplaceAndRemove t oldValue newValue
+        // newValue is now out of scope and can be collected
 
-        // Force GC - the key should NOT be collected yet because newValue's tracker holds it
+        // Force GC - the key should be collected because it's no longer held by any tracker
+        // (removed from newValue's tracker by remove, and should have been removed from
+        // oldValue's tracker by replace)
         forceGc ()
-        keyWeak.IsAlive |> shouldEqual true
+        keyWeak.IsAlive |> shouldEqual false
 
-        // Now verify the key is NOT held by oldValue's tracker by letting oldValue be collected
-        // and checking that the key survives (it's held by newValue's tracker, not oldValue's)
-        // This is implicit - if the key were in both trackers, it would still survive.
-        // The real test is that oldValue can be finalized without issues.
-
+        // Keep oldValue alive - if the test passes, this proves the key is NOT retained by oldValue's tracker
         GC.KeepAlive oldValue
-        GC.KeepAlive newValue
 
     /// Helper: add key with value, then replace with same value multiple times, then remove.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
